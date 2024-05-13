@@ -1,5 +1,5 @@
 # Executables
-bin/
+bin
 spicetify-cli
 spicetify
 *.exe
@@ -14,3 +14,5 @@ package.json
 
 # Logs
 install.log
+
+pnpm-lock.yaml

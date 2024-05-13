@@ -94,8 +94,8 @@
 		}
 
 		changePosition(x, y) {
-			this.items.style.left = x + "px";
-			this.items.style.top = y + 40 + "px";
+			this.items.style.left = `${x}px`;
+			this.items.style.top = `${y + 40}px`;
 		}
 
 		storeScroll() {
@@ -119,6 +119,11 @@
 				uri.type === URI.Type.PLAYLIST;
 
 			this.innerHTML = `
+<style>
+.bookmark-card .ButtonInner-md-iconOnly:hover {
+	transform: scale(1.06);
+}
+</style>
 <div class="bookmark-card">
     ${
 			info.imageUrl
@@ -143,15 +148,16 @@
     </div>
     ${
 			isPlayable
-				? `<button class="main-playButton-PlayButton main-playButton-primary" aria-label="Play" title="Play" style="--size:48px;"><svg role="img" height="24" width="24" viewBox="0 0 16 16" fill="currentColor"><path d="M4.018 14L14.41 8 4.018 2z"></path></svg></button>`
+				? `<div class="ButtonInner-md-iconOnly"><button class="main-playButton-PlayButton main-playButton-primary" data-tippy-content="Play" style="--size:48px;"><svg role="img" height="24" width="24" viewBox="0 0 16 16" fill="currentColor"><path d="M4.018 14L14.41 8 4.018 2z"></path></svg></button></div>`
 				: ""
 		}
-    <button class="bookmark-controls" title="${REMOVE_TEXT}"><svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">${
-				Spicetify.SVGIcons.x
-			}</svg></button>
+    <button class="bookmark-controls" data-tippy-content="${REMOVE_TEXT}"><svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">${
+			Spicetify.SVGIcons.x
+		}</svg></button>
 </div>
 `;
 
+			Spicetify.Tippy(this.querySelectorAll("[data-tippy-content]"), Spicetify.TippyProps);
 			if (isPlayable) {
 				/** @type {HTMLButtonElement} */
 				const playButton = this.querySelector("button.main-playButton-PlayButton");
@@ -189,13 +195,25 @@
 
 	/**
 	 *
-	 * @param {string} name
+	 * @param {string} title
 	 * @param {() => void} callback
 	 */
-	function createMenuItem(name, callback) {
-		const item = new _HTMLContextMenuItem({ name });
-		item.onclick = callback;
-		return item;
+	function createMenuItem(title, callback) {
+		const wrapper = document.createElement("div");
+		Spicetify.ReactDOM.render(
+			Spicetify.React.createElement(
+				Spicetify.ReactComponent.MenuItem,
+				{
+					onClick: () => {
+						callback?.();
+					}
+				},
+				title
+			),
+			wrapper
+		);
+
+		return wrapper;
 	}
 
 	function createSortSelect(defaultOpt = 0) {
@@ -218,12 +236,18 @@
 	async function storeThisPage() {
 		let title;
 		let description;
+		let contextUri;
 
 		const context = Spicetify.Platform.History.location.pathname;
-		const contextUri = Spicetify.URI.fromString(context);
+		try {
+			contextUri = Spicetify.URI.fromString(context);
+		} catch (e) {
+			Spicetify.showNotification("Cannot bookmark this page", true);
+			return;
+		}
 		const uri = contextUri.toURI();
 
-		let titleElem =
+		const titleElem =
 			document.querySelector(".Root__main-view h1") ||
 			document.querySelector(".Root__main-view h2") ||
 			document.querySelector(".Root__main-view h3") ||
@@ -240,7 +264,7 @@
 			description = contextUri.type.replace(/\-.+$/, "");
 			const tail = context.split("/");
 			if (tail.length > 3) {
-				description += " " + tail[3];
+				description += ` ${tail[3]}`;
 			}
 			description = idToProperName(description);
 		}
@@ -264,18 +288,19 @@
 
 	function getTrackMeta() {
 		const meta = {
-			title: Player.data.track.metadata.title,
-			imageUrl: Player.data.track.metadata.image_url
+			title: Player.data.item.metadata.title,
+			imageUrl: Player.data.item.metadata.image_url
 		};
-		meta.uri = Player.data.track.uri;
+		meta.uri = Player.data.item.uri;
 		if (URI.isEpisode(meta.uri)) {
-			meta.description = Player.data.track.metadata.album_title;
+			meta.description = Player.data.item.metadata.album_title;
 		} else {
-			meta.description = Player.data.track.metadata.artist_name;
+			meta.description = Player.data.item.metadata.artist_name;
 		}
-		const contextUri = URI.fromString(Spicetify.Player.data.context_uri);
+		const playerState = Spicetify.Player.data;
+		const contextUri = URI.fromString(playerState.context_uri ?? playerState.context.uri);
 		if (contextUri && (contextUri.type === URI.Type.PLAYLIST || contextUri.type === URI.Type.PLAYLIST_V2 || contextUri.type === URI.Type.ALBUM)) {
-			meta.context = `/${contextUri.toURLPath()}?uid=${Player.data.track.uid}`;
+			meta.context = `/${contextUri.toURLPath()}?uid=${Player.data.item.uid}`;
 		}
 
 		return meta;
@@ -294,9 +319,9 @@
 
 	// Utilities
 	function idToProperName(id) {
-		id = id.replace(/\-/g, " ").replace(/^.|\s./g, char => char.toUpperCase());
+		const newId = id.replace(/\-/g, " ").replace(/^.|\s./g, char => char.toUpperCase());
 
-		return id;
+		return newId;
 	}
 
 	function createMenu() {
@@ -423,7 +448,7 @@
 	 * Handle Link click event when item context is a playlist
 	 */
 	async function onLinkClick(info) {
-		if (info?.context?.startsWith("/")) {
+		if (info.context?.startsWith("/")) {
 			Spicetify.Platform.History.push(info.context);
 			return;
 		}
@@ -437,24 +462,27 @@
 		if (info.time) {
 			options.seekTo = info.time;
 		}
-		if (info?.context?.startsWith("/")) {
+		if (info.context?.startsWith("/")) {
 			uri = URI.fromString(info.context).toURI();
-			options.skipTo = {};
-			options.skipTo.uid = info.context.split("?uid=", 2)[1];
-			options.skipTo.uri = info.uri;
+			if (uri !== info.uri) {
+				options.skipTo = {};
+				options.skipTo.uid = info.context.split("?uid=", 2)[1];
+				options.skipTo.uri = info.uri;
+			}
 		}
 
 		Spicetify.Player.playUri(uri, {}, options);
 	}
 
 	const fetchAlbum = async uri => {
-		const base62 = uri.split(":")[2];
-		const res = await CosmosAsync.get(`wg://album/v1/album-app/album/${base62}/desktop`);
+		const { getAlbum } = Spicetify.GraphQL.Definitions;
+		const { data } = await Spicetify.GraphQL.Request(getAlbum, { uri, locale: Spicetify.Locale.getLocale(), offset: 0, limit: 10 });
+		const res = data.albumUnion;
 		return {
 			uri,
 			title: res.name,
 			description: "Album",
-			imageUrl: res.cover.uri
+			imageUrl: res.coverArt.sources.reduce((prev, curr) => (prev.width > curr.width ? prev : curr)).url
 		};
 	};
 
@@ -472,28 +500,36 @@
 	};
 
 	const fetchArtist = async uri => {
-		const base62 = uri.split(":")[2];
-		const res = await CosmosAsync.get(`wg://artist/v1/${base62}/desktop?format=json`);
+		const { queryArtistOverview } = Spicetify.GraphQL.Definitions;
+		const { data } = await Spicetify.GraphQL.Request(queryArtistOverview, {
+			uri,
+			locale: Spicetify.Locale.getLocale(),
+			includePrerelease: false
+		});
+		const res = data.artistUnion;
 		return {
 			uri,
-			title: res.info.name,
+			title: res.profile.name,
 			description: "Artist",
-			imageUrl: res.header_image.image
+			imageUrl:
+				res.visuals.avatarImage?.sources.reduce((prev, curr) => (prev.width > curr.width ? prev : curr)).url ||
+				res.visuals.headerImage?.sources[0].url
 		};
 	};
 
 	const fetchTrack = async (uri, uid, context) => {
 		const base62 = uri.split(":")[2];
 		const res = await CosmosAsync.get(`https://api.spotify.com/v1/tracks/${base62}`);
+		let newContext;
 		if (context && uid && Spicetify.URI.isPlaylistV1OrV2(context)) {
-			context = Spicetify.URI.fromString(context).toURLPath(true) + "?uid=" + uid;
+			newContext = `${Spicetify.URI.fromString(context).toURLPath(true)}?uid=${uid}`;
 		}
 		return {
 			uri,
 			title: res.name,
 			description: res.artists[0].name,
 			imageUrl: res.album.images[0].url,
-			context
+			context: newContext ?? context
 		};
 	};
 
@@ -504,7 +540,7 @@
 		return {
 			uri,
 			title: res.name,
-			description: res.show.name + " episode",
+			description: `${res.show.name} episode`,
 			imageUrl: res.show.images[0].url
 		};
 	};

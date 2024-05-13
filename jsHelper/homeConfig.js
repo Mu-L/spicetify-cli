@@ -1,25 +1,25 @@
 SpicetifyHomeConfig = {};
 
-(function () {
+(async () => {
 	// Status enum
-	const NORMAL = 0,
-		STICKY = 1,
-		LOWERED = 2;
+	const NORMAL = 0;
+	const STICKY = 1;
+	const LOWERED = 2;
 	// List of sections' metadata
 	let list;
 	// Store sections' statuses
 	const statusDic = {};
 	let mounted = false;
 
-	SpicetifyHomeConfig.arrange = function (sections) {
+	SpicetifyHomeConfig.arrange = sections => {
 		mounted = true;
 		if (list) {
 			return list;
 		}
 		const stickList = (localStorage.getItem("spicetify-home-config:stick") || "").split(",");
 		const lowList = (localStorage.getItem("spicetify-home-config:low") || "").split(",");
-		let stickSections = [];
-		let lowSections = [];
+		const stickSections = [];
+		const lowSections = [];
 		for (const uri of stickList) {
 			const index = sections.findIndex(a => a?.uri === uri);
 			if (index !== -1) {
@@ -38,7 +38,7 @@ SpicetifyHomeConfig = {};
 				sections[index] = undefined;
 			}
 		}
-		sections = sections.filter(a => a);
+		sections = sections.filter(Boolean);
 
 		list = [...stickSections, ...sections, ...lowSections];
 		return list;
@@ -50,8 +50,14 @@ SpicetifyHomeConfig = {};
 	down.innerText = "Down";
 	const lower = document.createElement("button");
 	const stick = document.createElement("button");
-	const style = document.createElement("style");
-	style.innerHTML = `
+	const sectionStyle = document.createElement("style");
+	sectionStyle.innerHTML = `
+.main-home-content section {
+	order: 0 !important;
+}
+`;
+	const containerStyle = document.createElement("style");
+	containerStyle.innerHTML = `
 #spicetify-home-config {
     position: relative;
     width: 100%;
@@ -60,6 +66,7 @@ SpicetifyHomeConfig = {};
     justify-content: center;
     align-items: flex-start;
     gap: 5px;
+    z-index: 9999;
 }
 #spicetify-home-config button {
     min-width: 60px;
@@ -76,18 +83,21 @@ SpicetifyHomeConfig = {};
 
 	const container = document.createElement("div");
 	container.id = "spicetify-home-config";
-	container.append(style, up, down, lower, stick);
+	container.append(containerStyle, up, down, lower, stick);
+	document.head.append(sectionStyle);
 	let elem = [];
 
 	function injectInteraction() {
 		const main = document.querySelector(".main-home-content");
 		elem = [...main.querySelectorAll("section")];
-		elem.forEach((item, index) => (item.dataset.uri = list[index].uri));
+		for (const [index, item] of elem.entries()) {
+			item.dataset.uri = list[index].uri;
+		}
 
 		function appendItems() {
-			const stick = [],
-				low = [],
-				normal = [];
+			const stick = [];
+			const low = [];
+			const normal = [];
 			for (const el of elem) {
 				if (statusDic[el.dataset.uri] === STICKY) stick.push(el);
 				else if (statusDic[el.dataset.uri] === LOWERED) low.push(el);
@@ -125,7 +135,7 @@ SpicetifyHomeConfig = {};
 			appendItems();
 		}
 
-		elem.forEach(el => {
+		for (const el of elem) {
 			el.onmouseover = () => {
 				const status = statusDic[el.dataset.uri];
 				const index = elem.findIndex(a => a === el);
@@ -151,44 +161,51 @@ SpicetifyHomeConfig = {};
 
 				el.prepend(container);
 			};
-		});
+		}
 	}
 
 	function removeInteraction() {
 		container.remove();
-		elem.forEach(a => (a.onmouseover = undefined));
+		for (const a of elem) {
+			a.onmouseover = undefined;
+		}
 	}
 
-	const menu = new Spicetify.Menu.Item("Home config", false, self => {
-		self.isEnabled = !self.isEnabled;
-		if (self.isEnabled) {
-			injectInteraction();
-		} else {
-			removeInteraction();
-		}
-	});
-	SpicetifyHomeConfig.addToMenu = () => menu.register();
+	await new Promise(res => Spicetify.Events.webpackLoaded.on(res));
+
+	SpicetifyHomeConfig.menu = new Spicetify.Menu.Item(
+		"Home config",
+		false,
+		self => {
+			self.setState(!self.isEnabled);
+			if (self.isEnabled) {
+				injectInteraction();
+			} else {
+				removeInteraction();
+			}
+		},
+		Spicetify.SVGIcons["grid-view"]
+	);
+
+	SpicetifyHomeConfig.addToMenu = () => {
+		SpicetifyHomeConfig.menu.register();
+	};
 	SpicetifyHomeConfig.removeMenu = () => {
-		menu.isEnabled = false;
-		menu.deregister();
+		SpicetifyHomeConfig.menu.setState(false);
+		SpicetifyHomeConfig.menu.deregister();
 	};
 
-	(function waitForHistoryAPI() {
-		if (!Spicetify.Platform?.History || !mounted) {
-			setTimeout(waitForHistoryAPI, 100);
-			return;
-		}
-		// Init
-		if (Spicetify.Platform.History.location.pathname === "/") {
-			SpicetifyHomeConfig.addToMenu();
-		}
+	await new Promise(res => Spicetify.Events.platformLoaded.on(res));
+	// Init
+	if (Spicetify.Platform.History.location.pathname === "/") {
+		SpicetifyHomeConfig.addToMenu();
+	}
 
-		Spicetify.Platform.History.listen(({ pathname }) => {
-			if (pathname === "/") {
-				SpicetifyHomeConfig.addToMenu();
-			} else {
-				SpicetifyHomeConfig.removeMenu();
-			}
-		});
-	})();
+	Spicetify.Platform.History.listen(({ pathname }) => {
+		if (pathname === "/") {
+			SpicetifyHomeConfig.addToMenu();
+		} else {
+			SpicetifyHomeConfig.removeMenu();
+		}
+	});
 })();

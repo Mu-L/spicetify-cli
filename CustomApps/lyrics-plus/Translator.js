@@ -1,33 +1,45 @@
 const kuroshiroPath = "https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js";
 const kuromojiPath = "https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js";
+const aromanize = "https://cdn.jsdelivr.net/npm/aromanize@0.1.5/aromanize.min.js";
 const openCCPath = "https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.min.js";
 
 const dictPath = "https:/cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict";
 
 class Translator {
-	constructor() {
-		this.includeExternal(kuroshiroPath);
-		this.includeExternal(kuromojiPath);
-		this.includeExternal(openCCPath);
+	constructor(lang) {
+		this.finished = {
+			ja: false,
+			ko: false,
+			zh: false
+		};
 
-		this.createTranslator();
-
-		this.finished = false;
+		this.applyKuromojiFix();
+		this.injectExternals(lang);
+		this.createTranslator(lang);
 	}
 
 	includeExternal(url) {
 		if (CONFIG.visual.translate && !document.querySelector(`script[src="${url}"]`)) {
-			var script = document.createElement("script");
+			const script = document.createElement("script");
 			script.setAttribute("type", "text/javascript");
 			script.setAttribute("src", url);
-			document.body.appendChild(script);
+			document.head.appendChild(script);
 		}
 	}
 
-	injectExternals() {
-		this.includeExternal(kuroshiroPath);
-		this.includeExternal(kuromojiPath);
-		this.includeExternal(openCCPath);
+	injectExternals(lang) {
+		switch (lang?.slice(0, 2)) {
+			case "ja":
+				this.includeExternal(kuromojiPath);
+				this.includeExternal(kuroshiroPath);
+				break;
+			case "ko":
+				this.includeExternal(aromanize);
+				break;
+			case "zh":
+				this.includeExternal(openCCPath);
+				break;
+		}
 	}
 
 	/**
@@ -46,30 +58,50 @@ class Translator {
 		};
 	}
 
-	async createTranslator() {
-		if (typeof Kuroshiro === "undefined" || typeof KuromojiAnalyzer === "undefined" || typeof OpenCC === "undefined") {
-			// Waiting for JSDeliver to load Kuroshiro, Kuromoji and OpenCC
-			setTimeout(this.createTranslator.bind(this), 50);
-			return;
+	async createTranslator(lang) {
+		switch (lang.slice(0, 2)) {
+			case "ja":
+				if (this.kuroshiro) return;
+				if (typeof Kuroshiro === "undefined" || typeof KuromojiAnalyzer === "undefined") {
+					await Translator.#sleep(50);
+					return this.createTranslator(lang);
+				}
+
+				this.kuroshiro = new Kuroshiro.default();
+				this.kuroshiro.init(new KuromojiAnalyzer({ dictPath })).then(
+					function () {
+						this.finished.ja = true;
+					}.bind(this)
+				);
+
+				break;
+			case "ko":
+				if (this.Aromanize) return;
+				if (typeof Aromanize === "undefined") {
+					await Translator.#sleep(50);
+					return this.createTranslator(lang);
+				}
+
+				this.Aromanize = Aromanize;
+				this.finished.ko = true;
+				break;
+			case "zh":
+				if (this.OpenCC) return;
+				if (typeof OpenCC === "undefined") {
+					await Translator.#sleep(50);
+					return this.createTranslator(lang);
+				}
+
+				this.OpenCC = OpenCC;
+				this.finished.zh = true;
+				break;
 		}
-
-		this.kuroshiro = new Kuroshiro.default();
-
-		this.OpenCC = OpenCC;
-
-		this.applyKuromojiFix();
-
-		this.kuroshiro.init(new KuromojiAnalyzer({ dictPath: dictPath })).then(
-			function () {
-				this.finished = true;
-			}.bind(this)
-		);
 	}
 
 	async romajifyText(text, target = "romaji", mode = "spaced") {
-		if (!this.finished) {
-			setTimeout(this.romajifyText.bind(this), 100, text, target, mode);
-			return;
+		if (!this.finished.ja) {
+			await Translator.#sleep(100);
+			return this.romajifyText(text, target, mode);
 		}
 
 		return this.kuroshiro.convert(text, {
@@ -78,10 +110,20 @@ class Translator {
 		});
 	}
 
+	async convertToRomaja(text, target) {
+		if (!this.finished.ko) {
+			await Translator.#sleep(100);
+			return this.convertToRomaja(text, target);
+		}
+
+		if (target === "hangul") return text;
+		return Aromanize.hangulToLatin(text, "rr-translit");
+	}
+
 	async convertChinese(text, from, target) {
-		if (!this.finished) {
-			setTimeout(this.convertChinese.bind(this), 100, text, target);
-			return;
+		if (!this.finished.zh) {
+			await Translator.#sleep(100);
+			return this.convertChinese(text, from, target);
 		}
 
 		const converter = this.OpenCC.Converter({
@@ -90,5 +132,15 @@ class Translator {
 		});
 
 		return converter(text);
+	}
+
+	/**
+	 * Async wrapper of `setTimeout`.
+	 *
+	 * @param {number} ms
+	 * @returns {Promise<void>}
+	 */
+	static async #sleep(ms) {
+		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 }

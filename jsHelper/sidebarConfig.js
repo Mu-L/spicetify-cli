@@ -2,19 +2,20 @@
 	const sidebar = document.querySelector(".Root__nav-bar");
 	if (!sidebar) return setTimeout(SidebarConfig, 100);
 	// Status enum
-	const HIDDEN = 0,
-		SHOW = 1,
-		STICKY = 2;
+	const HIDDEN = 0;
+	const SHOW = 1;
+	const STICKY = 2;
 	// Store sidebar buttons elements
 	let appItems;
 	let list;
 	let hiddenList;
+
 	let isYLX;
+	let YLXSidebarState = 0;
 
 	// Store sidebar buttons
 	let buttons = [];
 	let ordered = [];
-	let initialized = false;
 
 	function arrangeItems(storage) {
 		const newButtons = [...buttons];
@@ -26,14 +27,16 @@
 				newButtons[index] = undefined;
 			}
 		}
-		newButtons.filter(a => a).forEach(a => orderedButtons.push([a, STICKY]));
+		for (const button of newButtons) {
+			if (button) orderedButtons.push([button, SHOW]);
+		}
 		ordered = orderedButtons;
 	}
 
 	function appendItems() {
-		const toShow = [],
-			toHide = [],
-			toStick = [];
+		const toShow = [];
+		const toHide = [];
+		const toStick = [];
 		for (const el of ordered) {
 			const [item, status] = el;
 			if (status === STICKY) {
@@ -50,7 +53,7 @@
 		ordered = [...toStick, ...toShow, ...toHide];
 	}
 
-	function writeStorage(isYLX = false) {
+	function writeStorage() {
 		const array = ordered.map(a => [a[0].dataset.id, a[1]]);
 
 		if (isYLX) return localStorage.setItem("spicetify-sidebar-config:ylx", JSON.stringify(array));
@@ -111,6 +114,11 @@ color: var(--spice-button-disabled);
 			appendItems();
 		}
 
+		if (isYLX) {
+			YLXSidebarState = Spicetify.Platform.LocalStorageAPI.getItem("ylx-sidebar-state");
+			if (YLXSidebarState === 1) document.querySelector(".main-yourLibraryX-collapseButton > button")?.click();
+		}
+
 		document.documentElement.style.setProperty("--nav-bar-width", "280px");
 
 		hiddenList.classList.remove("hidden-visually");
@@ -141,27 +149,53 @@ color: var(--spice-button-disabled);
 		}
 	}
 
-	function removeInteraction(isYLX) {
+	function removeInteraction() {
 		hiddenList.classList.add("hidden-visually");
 		container.remove();
-		ordered.forEach(a => (a[0].onmouseover = undefined));
-		document.documentElement.style.setProperty("--nav-bar-width", Spicetify.Platform.LocalStorageAPI.getItem("nav-bar-width") + "px");
-		writeStorage(isYLX);
+		for (const a of ordered) {
+			a[0].onmouseover = undefined;
+		}
+		if (isYLX) {
+			if (YLXSidebarState === 1) document.querySelector(".main-yourLibraryX-collapseButton > button")?.click();
+			else
+				document.documentElement.style.setProperty(
+					"--nav-bar-width",
+					`${Spicetify.Platform.LocalStorageAPI.getItem(
+						YLXSidebarState === 2 ? "ylx-expanded-state-nav-bar-width" : "ylx-default-state-nav-bar-width"
+					)}px`
+				);
+		} else document.documentElement.style.setProperty("--nav-bar-width", `${Spicetify.Platform.LocalStorageAPI.getItem("nav-bar-width")}px`);
+		writeStorage();
 	}
 
-	const sidebarConfigItem = new Spicetify.Menu.Item("Sidebar config", false, self => {
-		self.isEnabled = !self.isEnabled;
-		if (self.isEnabled) {
-			injectInteraction();
-		} else {
-			removeInteraction(isYLX);
-		}
-	});
+	(async () => {
+		await new Promise(res => Spicetify.Events.webpackLoaded.on(res));
+		new Spicetify.Menu.Item(
+			"Sidebar config",
+			false,
+			self => {
+				self.setState(!self.isEnabled);
+				if (self.isEnabled) {
+					injectInteraction();
+				} else {
+					removeInteraction();
+				}
+			},
+			`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="16px" height="16px" fill="currentcolor"><path d="M44.7,11L36,19.6c0,0-2.6,0-5.2-2.6s-2.6-5.2-2.6-5.2l8.7-8.7c-4.9-1.2-10.8,0.4-14.4,4c-5.4,5.4-0.6,12.3-2,13.7C12.9,28.7,5.1,34.7,4.9,35c-2.3,2.3-2.4,6-0.2,8.2c2.2,2.2,5.9,2.1,8.2-0.2c0.3-0.3,6.7-8.4,14.2-15.9c1.4-1.4,8,3.7,13.6-1.8C44.2,21.7,45.9,15.9,44.7,11z M9.4,41.1c-1.4,0-2.5-1.1-2.5-2.5C6.9,37.1,8,36,9.4,36c1.4,0,2.5,1.1,2.5,2.5C11.9,39.9,10.8,41.1,9.4,41.1z"/></svg>`
+		).register();
+	})();
 
-	function finishInit() {
-		if (initialized) return;
-		sidebarConfigItem.register();
-		initialized = true;
+	function initConfig() {
+		const libraryX = document.querySelector(".main-yourLibraryX-navItems");
+		const libraryLegacy = document.querySelector(".main-navBar-entryPoints");
+
+		if (!libraryLegacy && !libraryX) {
+			setTimeout(initConfig, 300);
+			return;
+		}
+
+		if (libraryX) InitSidebarXConfig();
+		else InitSidebarConfig();
 	}
 
 	function InitSidebarConfig() {
@@ -193,7 +227,7 @@ color: var(--spice-button-disabled);
 		playlistItems.prepend(list, hiddenList);
 
 		for (const ele of appItems.children) {
-			ele.dataset.id = ele.querySelector("a").pathname;
+			ele.dataset.id = ele.querySelector("a")?.pathname ?? "/add";
 			buttons.push(ele);
 		}
 
@@ -229,8 +263,6 @@ color: var(--spice-button-disabled);
 
 		arrangeItems(storage);
 		appendItems();
-
-		finishInit();
 	}
 
 	function InitSidebarXConfig() {
@@ -238,7 +270,7 @@ color: var(--spice-button-disabled);
 		const YLXAppItems = document.querySelector(".main-yourLibraryX-navItems");
 		const libraryItems = document.querySelector(".main-yourLibraryX-library");
 
-		if (!YLXAppItems || !libraryItems) {
+		if (!YLXAppItems || !libraryItems?.querySelector("ul")) {
 			setTimeout(InitSidebarXConfig, 300);
 			return;
 		}
@@ -273,27 +305,33 @@ color: var(--spice-button-disabled);
 			storage = buttons.map(el => [el.dataset.id, STICKY]);
 		}
 
+		const observer = new MutationObserver(mutations => {
+			for (const mutation of mutations) {
+				if (mutation.type === "childList" && mutation.addedNodes.length) {
+					mutation.addedNodes[0].id = "spicetify-playlist-list";
+				}
+			}
+		});
+		observer.observe(playlistList.parentElement, { childList: true });
+
 		arrangeItems(storage);
 		appendItems();
-
-		finishInit();
 	}
 
-	InitSidebarConfig();
-	InitSidebarXConfig();
+	initConfig();
 
 	// Rearrange sidebar when dynamically switching in Experimental Features
 	new MutationObserver(mutations => {
 		for (const mutation of mutations) {
 			if (mutation.attributeName === "class") {
-				if (mutation.target.classList.contains("hasYLXSidebar")) {
+				if (mutation.target.classList.contains("hasYLXSidebar") || !!mutation.target.querySelector(".main-yourLibraryX-entryPoints")) {
 					InitSidebarXConfig();
 				} else {
 					InitSidebarConfig();
 				}
 			}
 		}
-	}).observe(sidebar, { attributes: true, attributeFilter: ["class"] });
+	}).observe(sidebar, { childList: true, attributes: true, attributeFilter: ["class"] });
 
 	const customButtonStyle = document.createElement("style");
 	customButtonStyle.innerHTML = `
@@ -311,11 +349,11 @@ background: var(--spice-card);
 .main-rootlist-rootlist {
 margin-top: 0;
 }
-.Root__nav-bar:not(.hasYLXSidebar) #spicetify-show-list >* {
+.Root__nav-bar :not(.main-yourLibraryX-entryPoints) > #spicetify-show-list >* {
 padding: 0 24px 0 8px;
 }
-.hasYLXSidebar #spicetify-show-list,
-.hasYLXSidebar #spicetify-hidden-list {
+.main-yourLibraryX-entryPoints #spicetify-show-list,
+.main-yourLibraryX-entryPoints #spicetify-hidden-list {
 padding: 0 12px;
 }
 `;

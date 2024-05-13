@@ -9,11 +9,11 @@ const Providers = {
 			copyright: null
 		};
 
-		const baseURL = "wg://lyrics/v1/track/";
+		const baseURL = "https://spclient.wg.spotify.com/lyrics/v1/track/";
 		const id = info.uri.split(":")[2];
 		let body;
 		try {
-			body = await CosmosAsync.get(baseURL + id);
+			body = await Spicetify.CosmosAsync.get(baseURL + id);
 		} catch {
 			return { error: "Request error", uri: info.uri };
 		}
@@ -47,6 +47,7 @@ const Providers = {
 			karaoke: null,
 			synced: null,
 			unsynced: null,
+			musixmatchTranslation: null,
 			provider: "Musixmatch",
 			copyright: null
 		};
@@ -62,6 +63,11 @@ const Providers = {
 			return result;
 		}
 
+		const karaoke = await ProviderMusixmatch.getKaraoke(list);
+		if (karaoke) {
+			result.karaoke = karaoke;
+			result.copyright = list["track.lyrics.get"].message?.body?.lyrics?.lyrics_copyright?.trim();
+		}
 		const synced = ProviderMusixmatch.getSynced(list);
 		if (synced) {
 			result.synced = synced;
@@ -71,6 +77,15 @@ const Providers = {
 		if (unsynced) {
 			result.unsynced = unsynced;
 			result.copyright = list["track.lyrics.get"].message?.body?.lyrics?.lyrics_copyright?.trim();
+		}
+		const translation = await ProviderMusixmatch.getTranslation(list);
+		if ((synced || unsynced) && translation) {
+			const baseLyrics = synced ?? unsynced;
+			result.musixmatchTranslation = baseLyrics.map(line => ({
+				...line,
+				text: translation.find(t => t.matchedLine === line.text)?.translation ?? line.text,
+				originalText: line.text
+			}));
 		}
 
 		return result;
